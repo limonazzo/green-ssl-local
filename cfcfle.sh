@@ -3,17 +3,18 @@
 if [ -z "$1" ]
   then
     echo -e "\n\n"
-    echo "sh cfcfle.sh myawesomedomain.dev "
+    echo "sh cfcfle.sh myawesomedomain.dev dockerport "
     echo -e "\n"
     exit;
 fi
 
 
 awesomedomain=$1
+dockerport=$2
 
+## cert info
 CAfilename=limonazzo
 bitsStrong=8192
-
 CountryName=MX
 StateOrProvinceName=Mexico
 LocalityName=Mexico
@@ -23,7 +24,7 @@ CommonName=Limonazzo.com
 EmailAddress=i@limonazzo.com
 
 if [ ! -d "sslcache" ]; then
-mkdir sslcache
+  mkdir sslcache
 fi
 
 cd sslcache
@@ -75,39 +76,49 @@ openssl x509 -req -in $awesomedomain.csr \
 mkdir $awesomedomain
 mv $awesomedomain.* $awesomedomain/ 
 
+cd /etc/nginx/
 
+if [ ! -d "ssl" ]; then
+  mkdir ssl
+fi
 
-echo "================================================================================================================= "
-echo "================================================================================================================= "
-echo -e "\n"
-echo "import:  `pwd`/$CAfilename.pem to your browser  "
-echo -e "\n"
-echo "configure nginx: ================================================================"
-echo -e "\n"
-echo "cp `pwd`/$awesomedomain/$awesomedomain.crt /etc/nginx/ssl/$awesomedomain.crt "
-echo "cp `pwd`/$awesomedomain/$awesomedomain.key /etc/nginx/ssl/$awesomedomain.key "
-echo -e "\n"
-echo "server {"
-echo "    listen 443;"
-echo "    ssl on;"
-echo "    ssl_certificate /etc/nginx/ssl/$awesomedomain.crt; "
-echo "    ssl_certificate_key /etc/nginx/ssl/$awesomedomain.key;"
-echo "    server_name $awesomedomain;"
-echo "    location / { "
-echo "        ... "
-echo "    }"
-echo "}"
-echo -e "\n"
-echo "configure apache: ================================================================"
-echo -e "\n"
-echo "cp `pwd`/$awesomedomain/$awesomedomain.crt /etc/apache2/ssl/$awesomedomain.crt "
-echo "cp `pwd`/$awesomedomain/$awesomedomain.key /etc/apache2/ssl/$awesomedomain.key "
-echo -e "\n"
-echo "    SSLEngine on"
-echo "    SSLCertificateFile	/etc/apache2/ssl/$awesomedomain.crt "
-echo "    SSLCertificateKeyFile /etc/apache2/ssl/$awesomedomain.key "
-echo -e "\n"
-echo "================================================================================================================= "
-echo "================================================================================================================= "
+cp sslcache/$awesomedomain/$awesomedomain.crt /etc/nginx/ssl/$awesomedomain.crt 
+cp sslcache/$awesomedomain/$awesomedomain.key /etc/nginx/ssl/$awesomedomain.key
 
+NGINXDOMAIN=/etc/nginx/sites-available/$awesomedomain
+cat <<EOF >$NGINXDOMAIN
+server {
+    listen          443;
+    ssl             on;
+    ssl_certificate /etc/nginx/ssl/$awesomedomain.crt;
+    ssl_certificate_key /etc/nginx/ssl/$awesomedomain.key; 
+    server_name     $awesomedomain;
 
+    location / {
+        proxy_pass         https://127.0.0.1:$dockerport;
+        proxy_redirect     off;
+        proxy_set_header   Host \$host;
+        proxy_set_header   X-Real-IP \$remote_addr;
+        proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto \$scheme;
+        proxy_set_header   X-Forwarded-Host \$server_name;
+    }
+
+    add_header Last-Modified \$date_gmt;
+    add_header Cache-Control 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0';
+    if_modified_since off;
+    expires off;
+    etag off;
+}
+EOF
+
+cd /etc/nginx/sites-enabled 
+ln -s ../sites-available/$awesomedomain .
+
+NOW=$(date +%Y-%m-%d-%H.%M.%S)
+cp /etc/hosts /etc/hosts_backup_$NOW
+sed -i  "1s/^/127.0.0.1    ${awesomedomain}\n/" /etc/hosts
+
+#service nginx reload
+
+echo "done :), import  /etc/nginx/sslcache/$CAfilename.pem  and go to  https://$awesomedomain/" 
